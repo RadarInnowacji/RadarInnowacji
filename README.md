@@ -1,4 +1,4 @@
-📡# Radar Innowacji📡
+# 📡Radar Innowacji📡
 
 **Od ukrytego pomysłu do wdrożenia w kolejnej instytucji.**
 Rozwiązanie wyzwania *„Radar Innowacji”* Podkarpackiego Centrum Innowacji (HackNation 2026).
