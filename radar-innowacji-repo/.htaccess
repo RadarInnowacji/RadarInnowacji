@@ -1,0 +1,19 @@
+DirectoryIndex index.php
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+RewriteEngine On
+
+# Po włączeniu certyfikatu SSL w panelu usuń "#" z dwóch linijek poniżej (wymusza https)
+#RewriteCond %{HTTPS} !=on
+#RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Kod, szablony i baza danych nie są dostępne z przeglądarki
+RewriteRule ^(lib|templates|data)(/|$) - [F,L]
+RewriteRule (^|/)\. - [F,L]
+
+# Pliki statyczne (CSS/JS/fonty) serwuje serwer, wszystko inne idzie do index.php
+RewriteCond %{REQUEST_URI} !^/static/
+RewriteCond %{REQUEST_URI} !^/index\.php$
+RewriteRule ^ index.php [L,QSA]
+</IfModule>
