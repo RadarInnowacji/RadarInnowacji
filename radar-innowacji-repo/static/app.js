@@ -137,6 +137,39 @@
     if (msg && !window.confirm(msg)) e.preventDefault();
   });
 
+  // Formularze z ochroną antyspamową wymagają kilku sekund od wyświetlenia (boty wysyłają natychmiast).
+  // Gdy ktoś kliknie szybciej (np. adres uzupełniony automatycznie), nie pokazujemy błędu –
+  // po prostu chwilę czekamy i wysyłamy formularz sami.
+  const MIN_MS = 3600;
+  let shownAt = Date.now();
+  window.addEventListener("pageshow", (ev) => {
+    if (ev.persisted) {   // powrót przyciskiem „wstecz” – odblokuj przyciski
+      document.querySelectorAll("button[data-waiting]").forEach((b) => { b.disabled = false; b.textContent = b.dataset.waiting; delete b.dataset.waiting; });
+    }
+  });
+  document.addEventListener("submit", (e) => {
+    const form = e.target;
+    if (e.defaultPrevented || !form.querySelector('input[name="ft"]') || form.dataset.ready) return;
+    const tsInput = form.querySelector('[name="cf-turnstile-response"]');
+    const tsPending = form.querySelector(".cf-turnstile") && !(tsInput && tsInput.value);
+    let wait = MIN_MS - (Date.now() - shownAt);
+    if (wait <= 0 && !tsPending) return;
+    if (tsPending) wait = Math.max(wait, 400);
+    e.preventDefault();
+    const btn = e.submitter || form.querySelector("button:not([type=button])");
+    if (btn) { btn.dataset.waiting = btn.textContent; btn.disabled = true; btn.textContent = "Chwileczkę…"; }
+    const started = Date.now();
+    const go = () => {
+      const t = form.querySelector('[name="cf-turnstile-response"]');
+      if (form.querySelector(".cf-turnstile") && !(t && t.value) && Date.now() - started < 15000) { setTimeout(go, 300); return; }
+      form.dataset.ready = "1";
+      if (btn) { btn.disabled = false; }
+      if (form.requestSubmit) form.requestSubmit(btn && btn.form === form ? btn : undefined); else form.submit();
+      if (btn) { btn.disabled = true; }
+    };
+    setTimeout(go, wait);
+  });
+
   document.addEventListener("click", (e) => {
     const btn = e.target.closest(".vote-btn");
     if (btn && !btn.disabled) { e.preventDefault(); vote(btn); }

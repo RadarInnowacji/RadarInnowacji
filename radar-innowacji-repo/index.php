@@ -269,7 +269,7 @@ function page_need_new(): never {
       [$f['org_name'], $f['org_type'], $f['title'], $f['description'], $f['areas'], $f['offer'], $f['contact_email'], $u['id'], time()]);
     audit('need_submitted', ['title' => $f['title']]);
     foreach (admin_emails() as $adm)
-        send_mail($adm, 'Nowe zapotrzebowanie do moderacji: ' . $f['title'], "{$f['org_name']} ({$f['org_type']}) szuka:\n{$f['title']}\n\n{$f['description']}\n\nPanel: " . base_url() . "/admin\n\n" . site_name());
+        send_mail($adm, 'Nowe zapotrzebowanie do moderacji: ' . $f['title'], "{$f['org_name']} ({$f['org_type']}) szuka:\n{$f['title']}\n\n{$f['description']}\n\nPanel moderatora: " . base_url() . "/admin\n\n" . site_name());
     flash('Dziękujemy! Zapotrzebowanie trafiło do moderacji. Po publikacji pokażemy Ci pasujące innowacje – widzisz je tylko Ty i ich twórcy.', 'ok');
     redirect('/zapotrzebowania');
 }
@@ -306,7 +306,7 @@ function page_login(): never {
           [hash('sha256', $token), $email, $norm, time(), time() + 1800]);
         $link = base_url() . "/auth/$token?next=" . urlencode($next);
         $ok = send_mail($email, 'Logowanie – ' . site_name(),
-            "Cześć!\n\nKliknij, aby się zalogować (link ważny 30 minut, jednorazowy):\n$link\n\nJeśli to nie Ty – zignoruj tę wiadomość.\n\n" . site_name());
+            "Cześć!\n\nKliknij przycisk poniżej, aby zalogować się na platformie " . site_name() . ". Link działa 30 minut i tylko raz.\n\n$link\n\nJeśli to nie Ty prosiłeś o logowanie – po prostu zignoruj tę wiadomość.\n\n" . site_name(), 'Zaloguj się');
         if (!$ok) { flash('Nie udało się wysłać e-maila. Spróbuj ponownie za chwilę.', 'error'); render('login', ['email' => $email, 'next' => $next], 500); }
         $_SESSION['dev_link'] = (is_debug() && !cfg('SMTP_HOST')) ? $link : null;
         redirect('/logowanie/wyslano');
@@ -403,7 +403,7 @@ function page_submit(): never {
         send_mail($adm, 'Nowa innowacja do moderacji: ' . $f['title'],
             "Nowa innowacja czeka na moderację.\n\nNazwa: {$f['title']}\nInstytucja: {$f['institution']} ({$f['location']})\n"
             . "Rodzaj: " . (INNO_TYPES_SHORT[$f['innovation_type']] ?? '') . "\nZgłaszający: {$u['email']}\n\n{$f['summary']}\n\n"
-            . "Podgląd: " . base_url() . "/projekt/$newId\nPanel: " . base_url() . "/admin\n\n" . site_name());
+            . "Podgląd: " . base_url() . "/projekt/$newId\nPanel moderatora: " . base_url() . "/admin\n\n" . site_name());
     }
     flash('Dziękujemy! Innowacja trafiła do moderacji. Wstępną ocenę i rekomendację zobaczysz na jej karcie.', 'ok');
     redirect("/projekt/$newId");
@@ -548,7 +548,7 @@ function admin_project(int $pid, string $action): never {
         $body = $status === 'approved'
             ? "Twój projekt „{$p['title']}” został zatwierdzony i jest już widoczny na radarze:\n" . base_url() . "/projekt/$pid\n\nPodziel się linkiem – każdy może oddać na niego głos."
             : "Twój projekt „{$p['title']}” nie został opublikowany." . ($p['review_note'] ? "\n\nUzasadnienie: {$p['review_note']}" : '');
-        send_mail($p['email'], ($status === 'approved' ? 'Projekt opublikowany: ' : 'Decyzja w sprawie projektu: ') . $p['title'], $body . "\n\n" . site_name());
+        send_mail($p['email'], ($status === 'approved' ? 'Projekt opublikowany: ' : 'Decyzja w sprawie projektu: ') . $p['title'], $body . "\n\n" . site_name(), 'Zobacz kartę innowacji');
     }
     flash("Projekt #$pid: " . ['approved' => 'zatwierdzony', 'rejected' => 'odrzucony', 'pending' => 'cofnięty do moderacji'][$status] . '.', 'ok');
     redirect('/admin');

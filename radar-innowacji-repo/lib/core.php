@@ -184,29 +184,99 @@ function check_email(string $email): ?string {
 
 /* ===================================================================== wysyłka poczty */
 
-function send_mail(string $to, string $subject, string $body): bool {
+function send_mail(string $to, string $subject, string $body, ?string $button = null): bool {
     $from = cfg('SMTP_FROM', site_name() . ' <no-reply@' . parse_url(base_url(), PHP_URL_HOST) . '>');
     $subjEnc = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+    $html = mail_html($subject, $body, $button);
+    $boundary = 'b' . bin2hex(random_bytes(12));
+    $mime = "MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"$boundary\"\r\nAuto-Submitted: auto-generated";
+    $content = "--$boundary\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($body))
+             . "--$boundary\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($html))
+             . "--$boundary--\r\n";
     if (!cfg('SMTP_HOST')) {
         // Bez SMTP: wbudowana funkcja mail() serwera (na nazwa.pl działa od ręki)
-        if (is_debug()) { error_log("[DEV MAIL] $to | $subject\n$body"); return true; }
+        if (is_debug()) {
+            error_log("[DEV MAIL] $to | $subject\n$body");
+            @file_put_contents(ROOT . '/data/ostatni-mail.html', $html);   // podgląd wyglądu przy pracy lokalnej
+            return true;
+        }
         preg_match('/<([^>]+)>/', $from, $m);
         $fromAddr = $m[1] ?? $from;
-        $headers = "From: $from\r\nReply-To: $fromAddr\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit";
-        $ok = @mail($to, $subjEnc, $body, $headers, '-f' . $fromAddr);
+        $headers = "From: $from\r\nReply-To: $fromAddr\r\n$mime";
+        $ok = @mail($to, $subjEnc, $content, $headers, '-f' . $fromAddr);
         mail_log('mail() z parametrem -f: ' . ($ok ? 'przyjęte przez serwer' : 'ODRZUCONE'));
         if (!$ok) {
-            $ok = @mail($to, $subjEnc, $body, $headers);
+            $ok = @mail($to, $subjEnc, $content, $headers);
             mail_log('mail() bez -f: ' . ($ok ? 'przyjęte przez serwer' : 'ODRZUCONE'));
         }
         return $ok;
     }
-    return smtp_send($to, $subjEnc, $body, $from);
+    return smtp_send($to, $subjEnc, $content, $from, $mime);
+}
+
+/* Zamienia zwykły tekst maila na estetyczny HTML (tabele + style inline – działa w Gmailu, Outlooku i na telefonach).
+   Reguły: pusta linia = nowy akapit; linia z samym adresem lub „Etykieta: adres” z tej strony = przycisk;
+   „Klucz: wartość” = pogrubiony klucz; akapit zaczynający się od „Wiadomość:” = cytat; ostatni akapit z nazwą serwisu = stopka. */
+function mail_html(string $subject, string $body, ?string $button = null): string {
+    $site = site_name(); $base = base_url(); $host = parse_url($base, PHP_URL_HOST) ?: $base;
+    $e = fn($x) => htmlspecialchars($x, ENT_QUOTES, 'UTF-8');
+    $link = fn($x) => preg_replace('~(https?://[^\s<]+)~u', '<a href="$1" style="color:#0d4a86;text-decoration:underline">$1</a>',
+                         preg_replace('~([\w.+-]+@[\w-]+\.[\w.-]+)~u', '<a href="mailto:$1" style="color:#0d4a86">$1</a>', $x));
+    $btn = fn($label, $url) => '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0"><tr><td style="background:#0d4a86;border-radius:6px">'
+        . '<a href="' . $e($url) . '" style="display:inline-block;padding:14px 28px;font:700 16px/1.2 Arial,Helvetica,sans-serif;color:#ffffff;text-decoration:none">' . $e($label) . ' &rarr;</a></td></tr></table>';
+    $paras = preg_split("/\n\s*\n/", trim(str_replace("\r", '', $body)));
+    if ($paras && trim(end($paras)) === $site) array_pop($paras);
+    $out = ''; $pre = '';
+    foreach ($paras as $para) {
+        $lines = explode("\n", $para);
+        if (preg_match('/^Wiadomość:\s*$/u', $lines[0]) && count($lines) > 1) {
+            $out .= '<p style="margin:0 0 6px;font:700 13px Arial,sans-serif;color:#5b6b80;text-transform:uppercase;letter-spacing:.5px">Wiadomość</p>'
+                  . '<div style="margin:0 0 18px;padding:14px 18px;background:#f3f7fb;border-left:4px solid #8cc63f;font:15px/1.6 Arial,sans-serif;color:#1d2b3a">'
+                  . nl2br($e(implode("\n", array_slice($lines, 1)))) . '</div>';
+            continue;
+        }
+        $html = []; $buttons = '';
+        foreach ($lines as $ln) {
+            $t = trim($ln);
+            if ($pre === '' && $t !== '' && !preg_match('~https?://~', $t)) $pre = $t;
+            if (preg_match('~^(https?://\S+)$~', $t, $m) && str_starts_with($m[1], $base)) { $buttons .= $btn($button ?? 'Otwórz', $m[1]) . '<p style="margin:-8px 0 18px;font:12px/1.5 Arial,sans-serif;color:#6b7a8c;word-break:break-all">Przycisk nie działa? Skopiuj ten adres do przeglądarki:<br>' . $link($e($m[1])) . '</p>'; continue; }
+            if (preg_match('~^([^:]{2,30}):\s*(https?://\S+)$~u', $t, $m) && str_starts_with($m[2], $base)) { $buttons .= $btn($m[1], $m[2]); continue; }
+            if (preg_match('/^([A-ZĄĆĘŁŃÓŚŹŻ][^:]{1,30}):\s+(.+)$/u', $t, $m))
+                $html[] = '<strong style="color:#0b1d45">' . $e($m[1]) . ':</strong> ' . $link($e($m[2]));
+            else $html[] = $link($e($t));
+        }
+        $html = array_filter($html, fn($x) => $x !== '');
+        if ($html) $out .= '<p style="margin:0 0 16px;font:16px/1.6 Arial,Helvetica,sans-serif;color:#1d2b3a">' . implode('<br>', $html) . '</p>';
+        $out .= $buttons;
+    }
+    $logo = $e($base . '/static/mail-logo.png');
+    return '<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        . '<meta name="color-scheme" content="light"><title>' . $e($subject) . '</title></head>'
+        . '<body style="margin:0;padding:0;background:#eef2f7">'
+        . '<div style="display:none;max-height:0;overflow:hidden;opacity:0">' . $e(mb_substr($pre, 0, 120)) . '</div>'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f7"><tr><td align="center" style="padding:28px 12px">'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px">'
+        // nagłówek
+        . '<tr><td style="background:#0b1d45;border-radius:10px 10px 0 0;padding:22px 32px">'
+        . '<table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+        . '<td style="padding-right:12px"><img src="' . $logo . '" width="40" height="40" alt="" style="display:block;border:0"></td>'
+        . '<td style="font:700 20px Arial,Helvetica,sans-serif;color:#ffffff">' . $e($site) . '</td></tr></table></td></tr>'
+        . '<tr><td style="background:#8cc63f;height:4px;line-height:4px;font-size:0">&nbsp;</td></tr>'
+        // treść
+        . '<tr><td style="background:#ffffff;padding:32px 32px 18px">'
+        . '<h1 style="margin:0 0 20px;font:700 22px/1.3 Arial,Helvetica,sans-serif;color:#0b1d45">' . $e($subject) . '</h1>'
+        . $out . '</td></tr>'
+        // stopka
+        . '<tr><td style="background:#ffffff;border-radius:0 0 10px 10px;padding:0 32px 26px">'
+        . '<p style="margin:0;padding-top:16px;border-top:1px solid #e2e8f0;font:13px/1.5 Arial,sans-serif;color:#6b7a8c">'
+        . 'Wiadomość wysłana automatycznie – prosimy na nią nie odpowiadać.<br>'
+        . '<a href="' . $e($base) . '" style="color:#0d4a86;text-decoration:none;font-weight:700">' . $e($host) . '</a> · odkrywamy, oceniamy i łączymy lokalne innowacje</p>'
+        . '</td></tr></table></td></tr></table></body></html>';
 }
 
 function mail_log(string $line): void { $GLOBALS['MAIL_LOG'][] = $line; }
 
-function smtp_send(string $to, string $subject, string $body, string $from): bool {
+function smtp_send(string $to, string $subject, string $content, string $from, string $mime): bool {
     $host = cfg('SMTP_HOST'); $port = cfg_int('SMTP_PORT', 465); $ssl = cfg_bool('SMTP_SSL', $port === 465);
     $fp = @stream_socket_client(($ssl ? 'ssl://' : 'tcp://') . "$host:$port", $errno, $errstr, 15);
     if (!$fp) { error_log("SMTP connect: $errstr"); mail_log("Nie można połączyć z $host:$port – $errstr"); return false; }
@@ -238,8 +308,7 @@ function smtp_send(string $to, string $subject, string $body, string $from): boo
         $cmd("RCPT TO:<$to>", [250, 251]);
         $cmd('DATA', [354]);
         $msg = "From: $from\r\nTo: <$to>\r\nSubject: $subject\r\nDate: " . date('r') . "\r\nMessage-ID: <" . bin2hex(random_bytes(12)) . "@$ehlo>\r\n"
-             . "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
-             . chunk_split(base64_encode($body));
+             . "$mime\r\n\r\n" . $content;
         $cmd($msg . "\r\n.", [250], '[treść wiadomości]');
         $cmd('QUIT', [221]);
         fclose($fp);
